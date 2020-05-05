@@ -16,13 +16,14 @@
 
 $(call inherit-product, vendor/xiaomi/rosy/rosy-vendor.mk)
 
+# Inherit common Conquer configuration
+$(call inherit-product, device/qcom/common/common.mk)
+
 # Overlays
 DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay
-DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay-lineage
 
 PRODUCT_ENFORCE_RRO_TARGETS := *
 PRODUCT_ENFORCE_RRO_EXCLUDED_OVERLAYS += \
-    $(LOCAL_PATH)/overlay-lineage/lineage-sdk \
     $(LOCAL_PATH)/overlay/packages/apps/Snap
 
 # Screen density
@@ -347,11 +348,7 @@ PRODUCT_PACKAGES += \
     qti-telephony-hidl-wrapper \
     qti_telephony_hidl_wrapper.xml \
     qti-telephony-utils \
-    qti_telephony_utils.xml \
-    telephony-ext
-
-PRODUCT_BOOT_JARS += \
-    telephony-ext
+    qti_telephony_utils.xml
 
 # Seccomp policy
 PRODUCT_COPY_FILES += \

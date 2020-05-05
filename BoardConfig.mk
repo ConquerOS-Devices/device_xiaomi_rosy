@@ -16,6 +16,13 @@
 
 DEVICE_PATH := device/xiaomi/rosy
 
+# Hals
+PRODUCT_SOONG_NAMESPACES += \
+    hardware/qcom/audio \
+    hardware/qcom/display \
+    hardware/qcom/media \
+    hardware/qcom/gps
+
 # Architecture
 TARGET_ARCH := arm64
 TARGET_ARCH_VARIANT := armv8-a

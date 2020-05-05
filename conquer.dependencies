@@ -1,0 +1,8 @@
+[
+   {
+      "remote":"github",
+      "branch":"ten",
+      "repository":"Pulkit077/kernel_xiaomi_rosy",
+      "target_path":"kernel/xiaomi/rosy"
+   }
+]
