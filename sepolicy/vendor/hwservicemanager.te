@@ -1,3 +1,4 @@
+binder_call(hwservicemanager, lmkd)
 allow hwservicemanager init:dir { search };
 allow hwservicemanager init:file { read open };
 allow hwservicemanager init:process { getattr };
