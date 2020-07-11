@@ -18,6 +18,7 @@ $(call inherit-product, vendor/xiaomi/rosy/rosy-vendor.mk)
 
 # Inherit common Conquer configuration
 $(call inherit-product, device/qcom/common/common.mk)
+$(call inherit-product, vendor/xiaomi/rosy/perf/perf-vendor.mk)
 
 # Overlays
 DEVICE_PACKAGE_OVERLAYS += $(LOCAL_PATH)/overlay
@@ -296,6 +297,10 @@ PRODUCT_COPY_FILES += \
     $(LOCAL_PATH)/configs/perf/perfboostsconfig.xml:$(TARGET_COPY_OUT_VENDOR)/etc/perf/perfboostsconfig.xml \
     $(LOCAL_PATH)/configs/perf/targetconfig.xml:$(TARGET_COPY_OUT_VENDOR)/etc/perf/targetconfig.xml \
     $(LOCAL_PATH)/configs/perf/targetresourceconfigs.xml:$(TARGET_COPY_OUT_VENDOR)/etc/perf/targetresourceconfigs.xml
+
+PRODUCT_BOOT_JARS += \
+    QPerformance \
+    UxPerformance
 
 # Power
 PRODUCT_PACKAGES += \
