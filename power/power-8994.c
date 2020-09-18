@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016, 2018, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2014, The Linux Foundation. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -26,7 +26,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-
 #define LOG_NIDEBUG 0
 
 #include <dlfcn.h>
@@ -37,7 +36,6 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <time.h>
-#include <unistd.h>
 
 #define LOG_TAG "QTI PowerHAL"
 #include <hardware/hardware.h>
@@ -49,30 +47,6 @@
 #include "performance.h"
 #include "power-common.h"
 #include "utils.h"
-
-static int video_encode_hint_sent;
-
-static int display_fd;
-#define SYS_DISPLAY_PWR "/sys/kernel/hbtp/display_pwr"
-
-const int kMinInteractiveDuration = 500;  /* ms */
-const int kMaxInteractiveDuration = 5000; /* ms */
-const int kMaxLaunchDuration = 5000;      /* ms */
-
-/**
- * Returns true if the target is SDM632.
- */
-static bool is_target_SDM632(void) {
-    static int is_SDM632 = -1;
-    int soc_id;
-
-    if (is_SDM632 >= 0) return is_SDM632;
-
-    soc_id = get_soc_id();
-    is_SDM632 = soc_id == 349 || soc_id == 350;
-
-    return is_SDM632;
-}
 
 static int process_video_encode_hint(void* metadata) {
     char governor[80];
@@ -96,67 +70,87 @@ static int process_video_encode_hint(void* metadata) {
     }
 
     if (video_encode_metadata.state == 1) {
-        if (is_schedutil_governor(governor)) {
-            if (is_target_SDM632()) {
-                /* sample_ms = 10mS
-                 * SLB for Core0 = -6
-                 * SLB for Core1 = -6
-                 * SLB for Core2 = -6
-                 * SLB for Core3 = -6
-                 * hispeed load = 95
-                 * hispeed freq = 1036 */
-                int resource_values[] = {CPUBW_HWMON_SAMPLE_MS,
-                                         0xa,
-                                         0x40c68100,
-                                         0xfffffffa,
-                                         0x40c68110,
-                                         0xfffffffa,
-                                         0x40c68120,
-                                         0xfffffffa,
-                                         0x40c68130,
-                                         0xfffffffa,
-                                         0x41440100,
-                                         0x5f,
-                                         0x4143c100,
-                                         0x40c};
-                if (!video_encode_hint_sent) {
-                    perform_hint_action(video_encode_metadata.hint_id, resource_values,
-                                        ARRAY_SIZE(resource_values));
-                    video_encode_hint_sent = 1;
-                    return HINT_HANDLED;
-                }
-            } else {
-                /* sample_ms = 10mS */
-                int resource_values[] = {CPUBW_HWMON_SAMPLE_MS, 0xa};
-                if (!video_encode_hint_sent) {
-                    perform_hint_action(video_encode_metadata.hint_id, resource_values,
-                                        ARRAY_SIZE(resource_values));
-                    video_encode_hint_sent = 1;
-                    return HINT_HANDLED;
-                }
-            }
-        } else if (is_interactive_governor(governor)) {
-            /* Sched_load and migration_notification disable
-             * timer rate - 40mS*/
-            int resource_values[] = {INT_OP_CLUSTER0_USE_SCHED_LOAD,      0x1,
-                                     INT_OP_CLUSTER0_USE_MIGRATION_NOTIF, 0x1,
-                                     INT_OP_CLUSTER0_TIMER_RATE,          BIG_LITTLE_TR_MS_40};
-            if (!video_encode_hint_sent) {
-                perform_hint_action(video_encode_metadata.hint_id, resource_values,
-                                    ARRAY_SIZE(resource_values));
-                video_encode_hint_sent = 1;
-                return HINT_HANDLED;
-            }
+        if (is_interactive_governor(governor)) {
+            /* sched and cpufreq params
+             * hispeed freq - 768 MHz
+             * target load - 90
+             * above_hispeed_delay - 40ms
+             * sched_small_tsk - 50
+             */
+            int resource_values[] = {0x2C07, 0x2F5A, 0x2704, 0x4032};
+            perform_hint_action(video_encode_metadata.hint_id, resource_values,
+                                ARRAY_SIZE(resource_values));
+            return HINT_HANDLED;
         }
     } else if (video_encode_metadata.state == 0) {
-        if (is_interactive_governor(governor) || is_schedutil_governor(governor)) {
+        if (is_interactive_governor(governor)) {
             undo_hint_action(video_encode_metadata.hint_id);
-            video_encode_hint_sent = 0;
             return HINT_HANDLED;
         }
     }
     return HINT_NONE;
 }
+
+static int process_video_decode_hint(void* metadata) {
+    char governor[80];
+    struct video_decode_metadata_t video_decode_metadata;
+
+    if (!metadata) return HINT_NONE;
+
+    if (get_scaling_governor(governor, sizeof(governor)) == -1) {
+        ALOGE("Can't obtain scaling governor.");
+        return HINT_NONE;
+    }
+
+    /* Initialize decode metadata struct fields */
+    memset(&video_decode_metadata, 0, sizeof(struct video_decode_metadata_t));
+    video_decode_metadata.state = -1;
+    video_decode_metadata.hint_id = DEFAULT_VIDEO_DECODE_HINT_ID;
+
+    if (parse_video_decode_metadata((char*)metadata, &video_decode_metadata) == -1) {
+        ALOGE("Error occurred while parsing metadata.");
+        return HINT_NONE;
+    }
+
+    if (video_decode_metadata.state == 1) {
+        if (is_interactive_governor(governor)) {
+            int resource_values[] = {TR_MS_30, HISPEED_LOAD_90, HS_FREQ_1026,
+                                     THREAD_MIGRATION_SYNC_OFF};
+            perform_hint_action(video_decode_metadata.hint_id, resource_values,
+                                ARRAY_SIZE(resource_values));
+            return HINT_HANDLED;
+        }
+    } else if (video_decode_metadata.state == 0) {
+        if (is_interactive_governor(governor)) {
+            undo_hint_action(video_decode_metadata.hint_id);
+            return HINT_HANDLED;
+        }
+    }
+    return HINT_NONE;
+}
+
+// clang-format off
+static int resources_interaction_fling_boost[] = {
+    ALL_CPUS_PWR_CLPS_DIS,
+    SCHED_BOOST_ON,
+    SCHED_PREFER_IDLE_DIS
+};
+
+static int resources_interaction_boost[] = {
+    ALL_CPUS_PWR_CLPS_DIS,
+    SCHED_PREFER_IDLE_DIS
+};
+
+static int resources_launch[] = {
+    SCHED_BOOST_ON,
+    0x20C
+};
+// clang-format on
+
+const int kDefaultInteractiveDuration = 500; /* ms */
+const int kMinFlingDuration = 1500;          /* ms */
+const int kMaxInteractiveDuration = 5000;    /* ms */
+const int kMaxLaunchDuration = 5000;         /* ms */
 
 static void process_interaction_hint(void* data) {
     static struct timespec s_previous_boost_timespec;
@@ -164,7 +158,7 @@ static void process_interaction_hint(void* data) {
 
     struct timespec cur_boost_timespec;
     long long elapsed_time;
-    int duration = kMinInteractiveDuration;
+    int duration = kDefaultInteractiveDuration;
 
     if (data) {
         int input_duration = *((int*)data);
@@ -184,7 +178,12 @@ static void process_interaction_hint(void* data) {
     s_previous_boost_timespec = cur_boost_timespec;
     s_previous_duration = duration;
 
-    perf_hint_enable_with_type(VENDOR_HINT_SCROLL_BOOST, duration, SCROLL_VERTICAL);
+    if (duration >= kMinFlingDuration) {
+        interaction(duration, ARRAY_SIZE(resources_interaction_fling_boost),
+                    resources_interaction_fling_boost);
+    } else {
+        interaction(duration, ARRAY_SIZE(resources_interaction_boost), resources_interaction_boost);
+    }
 }
 
 static int process_activity_launch_hint(void* data) {
@@ -202,8 +201,8 @@ static int process_activity_launch_hint(void* data) {
     }
 
     if (!launch_mode) {
-        launch_handle = perf_hint_enable_with_type(VENDOR_HINT_FIRST_LAUNCH_BOOST,
-                                                   kMaxLaunchDuration, LAUNCH_BOOST_V1);
+        launch_handle = interaction_with_handle(launch_handle, kMaxLaunchDuration,
+                                                ARRAY_SIZE(resources_launch), resources_launch);
         if (!CHECK_HANDLE(launch_handle)) {
             ALOGE("Failed to perform launch boost");
             return HINT_NONE;
@@ -218,6 +217,9 @@ int power_hint_override(power_hint_t hint, void* data) {
     switch (hint) {
         case POWER_HINT_VIDEO_ENCODE:
             ret_val = process_video_encode_hint(data);
+            break;
+        case POWER_HINT_VIDEO_DECODE:
+            ret_val = process_video_decode_hint(data);
             break;
         case POWER_HINT_INTERACTION:
             process_interaction_hint(data);
@@ -234,12 +236,6 @@ int power_hint_override(power_hint_t hint, void* data) {
 
 int set_interactive_override(int on) {
     char governor[80];
-    int rc = 0;
-
-    static const char* display_on = "1";
-    static const char* display_off = "0";
-    char err_buf[80];
-    static int init_interactive_hint = 0;
 
     if (get_scaling_governor(governor, sizeof(governor)) == -1) {
         ALOGE("Can't obtain scaling governor.");
@@ -249,7 +245,7 @@ int set_interactive_override(int on) {
     if (!on) {
         /* Display off */
         if (is_interactive_governor(governor)) {
-            int resource_values[] = {INT_OP_CLUSTER0_TIMER_RATE, BIG_LITTLE_TR_MS_40};
+            int resource_values[] = {CPUS_ONLINE_MPD_OVERRIDE}; /* 4+0 core config in display off */
             perform_hint_action(DISPLAY_STATE_HINT_ID, resource_values,
                                 ARRAY_SIZE(resource_values));
         }
@@ -257,30 +253,6 @@ int set_interactive_override(int on) {
         /* Display on */
         if (is_interactive_governor(governor)) {
             undo_hint_action(DISPLAY_STATE_HINT_ID);
-        }
-    }
-
-    if (init_interactive_hint == 0) {
-        // First time the display is turned off
-        display_fd = TEMP_FAILURE_RETRY(open(SYS_DISPLAY_PWR, O_RDWR));
-        if (display_fd < 0) {
-            strerror_r(errno, err_buf, sizeof(err_buf));
-            ALOGE("Error opening %s: %s\n", SYS_DISPLAY_PWR, err_buf);
-        } else
-            init_interactive_hint = 1;
-    } else if (!on) {
-        /* Display off */
-        rc = TEMP_FAILURE_RETRY(write(display_fd, display_off, strlen(display_off)));
-        if (rc < 0) {
-            strerror_r(errno, err_buf, sizeof(err_buf));
-            ALOGE("Error writing %s to  %s: %s\n", display_off, SYS_DISPLAY_PWR, err_buf);
-        }
-    } else {
-        /* Display on */
-        rc = TEMP_FAILURE_RETRY(write(display_fd, display_on, strlen(display_on)));
-        if (rc < 0) {
-            strerror_r(errno, err_buf, sizeof(err_buf));
-            ALOGE("Error writing %s to  %s: %s\n", display_on, SYS_DISPLAY_PWR, err_buf);
         }
     }
     return HINT_HANDLED;
